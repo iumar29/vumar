@@ -125,13 +125,29 @@ public class JhipsterController {
             os.write(jsonPayload.getBytes("utf-8"));
         }
 
-        if (connection.getResponseCode() == HttpURLConnection.HTTP_CREATED) {
-            try (BufferedReader br = new BufferedReader(new InputStreamReader(connection.getInputStream(), "utf-8"))) {
-                String responseBody = br.lines().reduce("", (acc, line) -> acc + line.trim());
-                return responseBody.split("\"clone_url\":\"")[1].split("\"")[0];
+        int responseCode = connection.getResponseCode();
+        StringBuilder responseBody = new StringBuilder();
+        try (BufferedReader br = new BufferedReader(new InputStreamReader(connection.getInputStream(), "utf-8"))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                responseBody.append(line.trim());
             }
+        } catch (IOException e) {
+            // Capture error details in the response
+            try (BufferedReader errorReader = new BufferedReader(new InputStreamReader(connection.getErrorStream(), "utf-8"))) {
+                String errorLine;
+                while ((errorLine = errorReader.readLine()) != null) {
+                    responseBody.append(errorLine.trim());
+                }
+            }
+        }
+
+        if (responseCode == HttpURLConnection.HTTP_CREATED) {
+            String response = responseBody.toString();
+            logger.info("GitHub repository created successfully: {}", response);
+            return response.split("\"clone_url\":\"")[1].split("\"")[0];
         } else {
-            logger.error("Failed to create GitHub repository. Response code: {}", connection.getResponseCode());
+            logger.error("Failed to create GitHub repository. Response code: {}. Response body: {}", responseCode, responseBody);
             return null;
         }
     }
@@ -149,7 +165,15 @@ public class JhipsterController {
     private void runCommand(File workingDir, String... command) throws IOException, InterruptedException {
         ProcessBuilder processBuilder = new ProcessBuilder(command);
         processBuilder.directory(workingDir);
+        processBuilder.redirectErrorStream(true); // Redirect errors to the output stream for better logging
         Process process = processBuilder.start();
-        process.waitFor();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                logger.info("Command output: {}", line);
+            }
+        }
+        int exitCode = process.waitFor();
+        logger.info("Command exited with code {}", exitCode);
     }
 }
